@@ -1,0 +1,114 @@
+import MetaTrader5 as mt5
+import pandas as pd
+import time
+
+# Initialize connection to MetaTrader 5
+if not mt5.initialize():
+    print("Failed to initialize MetaTrader 5")
+    mt5.shutdown()
+
+# Login to MetaTrader 5 account
+account = 12345678  # replace with your account number
+password = "your_password"  # replace with your account password
+server = "your_broker_server"  # replace with your broker server
+authorized = mt5.login(account, password, server)
+
+if not authorized:
+    print("Failed to authorize account")
+    mt5.shutdown()
+    exit()
+
+# Define the symbol and timeframe
+symbol = "EURUSD"
+timeframe = mt5.TIMEFRAME_H1
+
+def fetch_data(symbol, timeframe, bars=100):
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+    rates_frame = pd.DataFrame(rates)
+    rates_frame['time'] = pd.to_datetime(rates_frame['time'], unit='s')
+    return rates_frame
+
+def is_three_white_soldiers(data):
+    if len(data) < 3:
+        return False
+
+    last_three = data[-3:]
+    open_prices = last_three['open'].values
+    close_prices = last_three['close'].values
+
+    # Check if all three candles are bullish
+    if all(close_prices > open_prices):
+        # Check if each candle opens within the body of the previous one
+        if (open_prices[1] > open_prices[0] and open_prices[1] < close_prices[0] and
+            open_prices[2] > open_prices[1] and open_prices[2] < close_prices[1]):
+            return True
+    return False
+
+def is_bullish_engulfing(data):
+    if len(data) < 2:
+        return False
+
+    last_two = data[-2:]
+    open_prices = last_two['open'].values
+    close_prices = last_two['close'].values
+
+    # Check for bullish engulfing pattern
+    if close_prices[0] < open_prices[0] and close_prices[1] > open_prices[1]:
+        if open_prices[1] < close_prices[0] and close_prices[1] > open_prices[0]:
+            return True
+    return False
+
+def is_bearish_engulfing(data):
+    if len(data) < 2:
+        return False
+
+    last_two = data[-2:]
+    open_prices = last_two['open'].values
+    close_prices = last_two['close'].values
+
+    # Check for bearish engulfing pattern
+    if close_prices[0] > open_prices[0] and close_prices[1] < open_prices[1]:
+        if open_prices[1] > close_prices[0] and close_prices[1] < open_prices[0]:
+            return True
+    return False
+
+def place_order(symbol, order_type, lot=0.1):
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": order_type,
+        "price": mt5.symbol_info_tick(symbol).ask if order_type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(symbol).bid,
+        "deviation": 10,
+        "magic": 234000,
+        "comment": "Pattern detected",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"Order failed, retcode={result.retcode}")
+    else:
+        print("Order placed successfully")
+
+def main():
+    while True:
+        data = fetch_data(symbol, timeframe)
+        
+        if is_three_white_soldiers(data):
+            print("Three White Soldiers pattern detected")
+            place_order(symbol, mt5.ORDER_TYPE_BUY)
+        elif is_bullish_engulfing(data):
+            print("Bullish Engulfing pattern detected")
+            place_order(symbol, mt5.ORDER_TYPE_BUY)
+        elif is_bearish_engulfing(data):
+            print("Bearish Engulfing pattern detected")
+            place_order(symbol, mt5.ORDER_TYPE_SELL)
+        
+        time.sleep(3600)  # Wait for the next hour
+
+if __name__ == "__main__":
+    main()
+
+    # Shutdown MetaTrader 5
+    mt5.shutdown()
